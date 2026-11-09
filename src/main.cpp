@@ -1,3 +1,6 @@
+#include <Arduino.h>
+
+// put function declarations here:
 const int trig_pin = 9;
 const int echo_pin = 10;
 
