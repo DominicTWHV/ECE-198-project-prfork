@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <ArduinoJson.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Bridge.h>
@@ -199,26 +198,13 @@ float captureDistanceCm() {
   return samples >= 5 ? total / samples : -1.0f;
 }
 
-bool requestApi(const String &method, const String &path, const String &body, String &response) {
+bool requestApi(const String &path, String &response) {
   Process process;
   process.begin(F("curl"));
   process.addParameter(F("--silent"));
   process.addParameter(F("--show-error"));
-  process.addParameter(F("--fail"));
   process.addParameter(F("--max-time"));
   process.addParameter(String(API_TIMEOUT_SECONDS));
-  process.addParameter(F("-X"));
-  process.addParameter(method);
-  process.addParameter(F("-H"));
-  process.addParameter(F("Content-Type: application/json"));
-  if (String(API_TOKEN).length() > 0) {
-    process.addParameter(F("-H"));
-    process.addParameter(String(F("Authorization: Bearer ")) + API_TOKEN);
-  }
-  if (body.length() > 0) {
-    process.addParameter(F("--data"));
-    process.addParameter(body);
-  }
   process.addParameter(String(API_BASE_URL) + path);
 
   const int exitCode = process.run();
@@ -226,23 +212,34 @@ bool requestApi(const String &method, const String &path, const String &body, St
   return exitCode == 0;
 }
 
-bool loadProfiles() {
+bool getProfileCount(size_t &count) {
   String response;
-  if (!requestApi(F("GET"), F(PROFILES_PATH), String(), response)) return false;
+  if (!requestApi(F(PROFILE_COUNT_PATH), response)) return false;
+  response.trim();
+  if (response.length() == 0) return false;
+  for (size_t i = 0; i < response.length(); ++i) {
+    if (!isDigit(response[i])) return false;
+  }
+  count = static_cast<size_t>(response.toInt());
+  return true;
+}
 
-  JsonDocument document;
-  if (deserializeJson(document, response)) return false;
-  JsonArray profileArray = document.is<JsonArray>()
-                               ? document.as<JsonArray>()
-                               : document["profiles"].as<JsonArray>();
+bool loadProfiles() {
+  size_t totalProfiles = 0;
+  if (!getProfileCount(totalProfiles)) return false;
   profileCount = 0;
-  for (JsonObjectConst item : profileArray) {
-    if (profileCount >= PROFILE_LIMIT) break;
-    const float minCm = item["min_cm"] | -1.0f;
-    const float maxCm = item["max_cm"] | -1.0f;
+  for (size_t id = 1; id <= totalProfiles && profileCount < PROFILE_LIMIT; ++id) {
+    String response;
+    const String path = String(PROFILE_RANGE_PATH) + F("?index=") + String(id);
+    if (!requestApi(path, response)) return false;
+    const int separator = response.indexOf(',');
+    if (separator < 0) continue;
+
+    const float minCm = response.substring(0, separator).toFloat();
+    const float maxCm = response.substring(separator + 1).toFloat();
     if (minCm <= 0.0f || maxCm <= minCm) continue;
-    profiles[profileCount].id = item["id"].as<String>();
-    profiles[profileCount].name = item["name"] | "Profile";
+    profiles[profileCount].id = String(id);
+    profiles[profileCount].name = String(F("Profile ")) + String(id);
     profiles[profileCount].minCm = minCm;
     profiles[profileCount].maxCm = maxCm;
     ++profileCount;
@@ -279,22 +276,16 @@ bool saveNewProfile() {
 
   if (offlineMode) return true;
 
-  JsonDocument document;
-  document["name"] = activeProfile.name;
-  document["standing_cm"] = standingDistanceCm;
-  document["lean_cm"] = leanDistanceCm;
-  document["min_cm"] = minCm;
-  document["max_cm"] = maxCm;
-  String body;
-  serializeJson(document, body);
-  String response;
-  if (!requestApi(F("POST"), F(PROFILES_PATH), body, response)) return false;
+  size_t previousCount = 0;
+  if (!getProfileCount(previousCount)) return false;
 
-  JsonDocument result;
-  if (!deserializeJson(result, response) && result["id"].is<String>()) {
-    activeProfile.id = result["id"].as<String>();
-  }
-  return true;
+  String response;
+  const String path = String(ADD_PROFILE_PATH) + F("?min=") + String(minCm, 1) +
+                      F("&max=") + String(maxCm, 1);
+  if (!requestApi(path, response)) return false;
+
+  size_t updatedCount = 0;
+  return getProfileCount(updatedCount) && updatedCount > previousCount;
 }
 
 void showCalibrationResult() {

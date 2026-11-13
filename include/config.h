@@ -1,8 +1,10 @@
 #pragma once
 
 // Set this to the API host and port reachable from the Yun Shield.
-#define API_BASE_URL "http://192.168.1.100:3000"
-#define PROFILES_PATH "/profiles"
+#define API_BASE_URL "http://192.168.1.100:5000"
+#define PROFILE_COUNT_PATH "/output"
+#define PROFILE_RANGE_PATH "/max_min_range"
+#define ADD_PROFILE_PATH "/add_profile"
 #define API_TOKEN ""
 #define API_TIMEOUT_SECONDS 8
 
